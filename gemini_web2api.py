@@ -49,7 +49,9 @@ __version__ = "1.1.0"
 
 DEFAULT_CONFIG = {
     "port": 8081,
-    "host": "0.0.0.0",
+    # Loopback by default; pass --host 0.0.0.0 (or set "host" in config)
+    # explicitly to expose the unauthenticated server on a network.
+    "host": "127.0.0.1",
     "retry_attempts": 3,
     "retry_delay_sec": 2,
     "request_timeout_sec": 180,
@@ -60,7 +62,9 @@ DEFAULT_CONFIG = {
     "log_requests": True,
     "cookie_file": None,
     "proxy": None,
-    "api_keys": [],
+    # None = not configured: /v1 fails closed (401) until api_keys is set.
+    # Explicit [] = open mode (private networks only).
+    "api_keys": None,
     "temporary_chats": False,
 }
 
@@ -653,7 +657,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _authorized(self):
-        keys = CONFIG.get("api_keys") or []
+        keys = CONFIG.get("api_keys")
+        if keys is None:
+            # Not configured: fail closed (set api_keys in config; [] means open).
+            return False
         if not keys:
             return True
         # Authorization: Bearer <key>
@@ -680,9 +687,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path.startswith("/v1") and not self._authorized():
-                self.send_json({"error": {"message": "invalid api key"}}, 401)
-                return
+            if self.path.startswith("/v1"):
+                if CONFIG.get("api_keys") is None:
+                    self.send_json({"error": {"message": "api keys not configured: set api_keys in the config file ([] disables auth on private networks)"}}, 401)
+                    return
+                if not self._authorized():
+                    self.send_json({"error": {"message": "invalid api key"}}, 401)
+                    return
             if self.path == "/v1/models":
                 self.send_json({"object": "list", "data": [
                     {"id": n, "object": "model", "created": 1700000000,
@@ -703,9 +714,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            if self.path.startswith("/v1") and not self._authorized():
-                self.send_json({"error": {"message": "invalid api key"}}, 401)
-                return
+            if self.path.startswith("/v1"):
+                if CONFIG.get("api_keys") is None:
+                    self.send_json({"error": {"message": "api keys not configured: set api_keys in the config file ([] disables auth on private networks)"}}, 401)
+                    return
+                if not self._authorized():
+                    self.send_json({"error": {"message": "invalid api key"}}, 401)
+                    return
             body = self._read_request_body()
             if self.path == "/v1/chat/completions":
                 self.handle_chat(body)
@@ -1056,6 +1071,7 @@ def load_config(path: str):
 def main():
     parser = argparse.ArgumentParser(description="Gemini Web to OpenAI API")
     parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--host", type=str, default=None, help="Bind address (default 127.0.0.1)")
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--cookie-file", type=str, default=None, help="Path to cookie file")
     parser.add_argument("--proxy", type=str, default=None, help="HTTP proxy, e.g. http://127.0.0.1:7890")
@@ -1070,6 +1086,8 @@ def main():
                 break
     load_config(config_path)
 
+    if args.host:
+        CONFIG["host"] = args.host
     if args.port:
         CONFIG["port"] = args.port
     if args.cookie_file:

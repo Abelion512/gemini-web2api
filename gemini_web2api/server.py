@@ -97,7 +97,10 @@ class GeminiHandler(BaseHTTPRequestHandler):
         return self.rfile.read(length) if length else b""
 
     def _authorized(self):
-        keys = CONFIG.get("api_keys") or []
+        keys = CONFIG.get("api_keys")
+        if keys is None:
+            # Not configured: fail closed (set api_keys in config; [] means open).
+            return False
         if not keys:
             return True
         # Authorization: Bearer <key>
@@ -124,9 +127,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         try:
-            if self.path.startswith("/v1") and not self._authorized():
-                self.send_json({"error": {"message": "invalid api key"}}, 401)
-                return
+            if self.path.startswith("/v1"):
+                if CONFIG.get("api_keys") is None:
+                    self.send_json({"error": {"message": "api keys not configured: set api_keys in the config file ([] disables auth on private networks)"}}, 401)
+                    return
+                if not self._authorized():
+                    self.send_json({"error": {"message": "invalid api key"}}, 401)
+                    return
             if self.path == "/v1/models":
                 self.send_json({"object": "list", "data": [
                     {"id": n, "object": "model", "created": 1700000000,
@@ -148,9 +155,13 @@ class GeminiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            if self.path.startswith("/v1") and not self._authorized():
-                self.send_json({"error": {"message": "invalid api key"}}, 401)
-                return
+            if self.path.startswith("/v1"):
+                if CONFIG.get("api_keys") is None:
+                    self.send_json({"error": {"message": "api keys not configured: set api_keys in the config file ([] disables auth on private networks)"}}, 401)
+                    return
+                if not self._authorized():
+                    self.send_json({"error": {"message": "invalid api key"}}, 401)
+                    return
             body = self._read_request_body()
             if self.path == "/v1/chat/completions":
                 self._handle_chat(body)

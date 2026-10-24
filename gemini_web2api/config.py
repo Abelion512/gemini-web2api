@@ -4,7 +4,9 @@ import os
 
 DEFAULT_CONFIG = {
     "port": 8081,
-    "host": "0.0.0.0",
+    # Loopback by default; set "host": "0.0.0.0" in config (as the Docker
+    # example does) to expose the server on a network explicitly.
+    "host": "127.0.0.1",
     "retry_attempts": 3,
     "retry_delay_sec": 2,
     "request_timeout_sec": 180,
@@ -15,7 +17,9 @@ DEFAULT_CONFIG = {
     "log_requests": True,
     "cookie_file": None,
     "proxy": None,
-    "api_keys": [],
+    # None = not configured: /v1 fails closed (401) until api_keys is set.
+    # Explicit [] = open mode (private networks only).
+    "api_keys": None,
     "temporary_chats": False,
 }
 

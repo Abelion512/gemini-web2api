@@ -206,7 +206,12 @@ var DEFAULT_CONFIG = {
   // 设置后，客户端必须在请求头中提供有效的密钥
   // 支持 Bearer Token、x-api-key、x-goog-api-key、URL 参数 ?key=
   // 示例: ["sk-gemini", "sk-my-custom-key"]
-  apiKeys: ['sk-gemini'],
+  // null 表示未配置 API 密钥：/v1 请求一律 401（fail closed）。
+  // 只有显式设置 API_KEYS 环境变量才会改变行为：
+  //   API_KEYS=["sk-a","sk-b"]  -> 白名单验证
+  //   API_KEYS=[]               -> 不验证（仅限内网/已有其他防护的场景）
+  // 不再内置公开示例密钥，避免默认部署即被任何人使用。
+  apiKeys: null,
 
   // ---- Cookie 认证 ----
   // Gemini 对匿名请求有严格的速率限制（容易触发 429 Too Many Requests）
@@ -641,7 +646,7 @@ function getRequestConfig(env) {
     } catch (e) {
       // JSON 解析失败时保留默认值
       // 输出错误日志但不中断程序运行
-      console.error('[ERROR] API_KEYS 解析失败: ' + e.message + '，使用默认值');
+      console.error('[ERROR] API_KEYS 解析失败: ' + e.message + '，保持未配置状态（所有 /v1 请求将被拒绝）');
     }
   }
 
@@ -1736,9 +1741,12 @@ function checkRateLimit(clientIP, config) {
  */
 function checkApiKey(request, config) {
   // 获取 API 密钥白名单
-  var keys = config.apiKeys || [];
+  // null/undefined = 未配置：fail closed，拒绝所有 /v1 请求
+  if (config.apiKeys === null || config.apiKeys === undefined) return false;
 
-  // 如果没有配置任何密钥，允许所有请求（不验证模式）
+  var keys = config.apiKeys;
+
+  // 显式配置为空数组 [] 时，允许所有请求（不验证模式，仅限内网）
   if (keys.length === 0) return true;
 
   // ================================================================
@@ -2570,10 +2578,17 @@ export default {
     // ================================================================
     // 仅对 /v1 路径的请求进行密钥验证
     // /health 等公共端点不需要验证
-    if (path.indexOf('/v1') === 0 && !checkApiKey(request, config)) {
-      return sendJSON({
-        error: { message: 'invalid api key' },
-      }, 401);  // HTTP 401 Unauthorized
+    if (path.indexOf('/v1') === 0) {
+      if (config.apiKeys === null || config.apiKeys === undefined) {
+        return sendJSON({
+          error: { message: 'api keys not configured: set the API_KEYS environment variable (JSON array of keys, or [] to disable auth on private networks)' },
+        }, 401);  // HTTP 401 Unauthorized
+      }
+      if (!checkApiKey(request, config)) {
+        return sendJSON({
+          error: { message: 'invalid api key' },
+        }, 401);  // HTTP 401 Unauthorized
+      }
     }
 
     // ================================================================
